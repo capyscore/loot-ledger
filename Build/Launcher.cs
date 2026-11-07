@@ -12,7 +12,7 @@ namespace LootLedger
     internal static class Launcher
     {
         private static readonly string[] Payload = {
-            "LootLedger.ps1", "Tracking.cs", "ChestSound.cs", "TrayUi.cs", "Overlay.xaml", "LICENSE"
+            "LootLedger.ps1", "Tracking.cs", "TrayUi.cs", "Overlay.xaml", "LICENSE"
         };
 
         [STAThread]

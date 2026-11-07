@@ -26,7 +26,7 @@ namespace LootLedger.Tests
 
         private static int See(ChestGate gate, long time, HudSignals hud)
         {
-            return gate.Observe(time, hud, new long[0], MatchPhase.Playing);
+            return gate.Observe(time, hud, MatchPhase.Playing);
         }
 
         public static string Run()
@@ -39,20 +39,20 @@ namespace LootLedger.Tests
             Equal(0, See(gate, 135, Hud("CHEST")), "Chest text without XP is excluded");
             gate.Reset();
 
-            Equal(0, gate.Observe(0, chest, new long[] { 0 }, MatchPhase.Aircraft), "Bus rejects even chest-like XP and sound");
-            Equal(0, gate.Observe(1500, Hud(), new long[0], MatchPhase.Aircraft), "Bus sound cannot age into a count");
+            Equal(0, gate.Observe(0, chest, MatchPhase.Aircraft), "Bus rejects chest-like XP");
+            Equal(0, gate.Observe(1500, Hud(), MatchPhase.Aircraft), "Tracking remains disabled on bus");
             Equal(false, gate.TrackingAllowed, "Tracking stays off on bus");
-            gate.Observe(1600, Hud("SPACE TO DEPLOY UMBRELLA"), new long[0], MatchPhase.Aircraft);
+            gate.Observe(1600, Hud("SPACE TO DEPLOY UMBRELLA"), MatchPhase.Aircraft);
             Equal(true, gate.TrackingAllowed, "An early jump enables tracking");
-            Equal(1, gate.Observe(1800, chest, new long[0], MatchPhase.Aircraft), "Early jumper can loot before SafeZones");
+            Equal(1, gate.Observe(1800, chest, MatchPhase.Aircraft), "Early jumper can loot before SafeZones");
             gate.Suspend();
-            Equal(0, gate.Observe(1900, chest, new long[0], MatchPhase.Aircraft), "Focus change preserves notice and jump state");
+            Equal(0, gate.Observe(1900, chest, MatchPhase.Aircraft), "Focus change preserves notice and jump state");
             Equal(true, gate.TrackingAllowed, "Jump state survives focus change");
-            Equal(0, gate.Observe(2000, Hud("SPACE TO JUMP", "+250 XP", "CHEST"), new long[] { 2000 }, MatchPhase.Playing), "Visible bus prompt overrides phase");
+            Equal(0, gate.Observe(2000, Hud("SPACE TO JUMP", "+250 XP", "CHEST"), MatchPhase.Playing), "Visible bus prompt overrides phase");
             Equal(false, gate.TrackingAllowed, "Bus prompt disables tracking");
-            Equal(1, gate.Observe(3500, chest, new long[0], MatchPhase.Playing), "SafeZones enables tracking without seeing jump");
-            Equal(0, gate.Observe(3600, chest, new long[] { 3550 }, MatchPhase.Playing), "HUD and sound count once");
-            Equal(0, See(gate, 4800, Hud()), "Matched sound cannot count later");
+            Equal(1, gate.Observe(3500, chest, MatchPhase.Playing), "SafeZones enables tracking without seeing jump");
+            Equal(0, gate.Observe(3600, chest, MatchPhase.Playing), "Repeated HUD notice counts once");
+            Equal(0, See(gate, 4800, Hud()), "A cleared HUD frame adds no count");
             gate.Reset();
 
             var passes = new List<HudLine> {

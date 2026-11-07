@@ -1,5 +1,6 @@
 param(
-    [string]$Version = '0.0.0'
+    [string]$Version = '0.0.0',
+    [string]$InnoCompiler
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,8 @@ $patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
 $numbers = @([int]$Matches[1], [int]$Matches[2], $patch, 0)
 if (@($numbers | Where-Object { $_ -gt 65534 }).Count) { throw 'Version components must be at most 65534.' }
 $assemblyVersion = $numbers -join '.'
+if (!$InnoCompiler) { $InnoCompiler = & (Join-Path $PSScriptRoot 'Get-InnoSetup.ps1') }
+if (!(Test-Path -LiteralPath $InnoCompiler)) { throw "Inno Setup compiler not found: $InnoCompiler" }
 
 [void][IO.Directory]::CreateDirectory($output)
 [void][IO.Directory]::CreateDirectory($intermediate)
@@ -44,7 +47,7 @@ $arguments = @(
     "/out:$exe"
 )
 # Only these files enter the executable; never package the workspace or saved data.
-foreach ($name in @('LootLedger.ps1', 'Tracking.cs', 'ChestSound.cs', 'TrayUi.cs', 'Overlay.xaml', 'LICENSE')) {
+foreach ($name in @('LootLedger.ps1', 'Tracking.cs', 'TrayUi.cs', 'Overlay.xaml', 'LICENSE')) {
     $path = Join-Path $root $name
     if (!(Test-Path -LiteralPath $path)) { throw "Missing application file: $name" }
     $arguments += "/resource:$path,LootLedger.Payload.$name"
@@ -53,10 +56,14 @@ $arguments += (Join-Path $PSScriptRoot 'Launcher.cs'), $assemblyInfo
 & $compiler @arguments
 if ($LASTEXITCODE -ne 0) { throw "C# compilation failed with exit code $LASTEXITCODE." }
 
+$installer = Join-Path $output 'LootLedger-Setup.exe'
+& $InnoCompiler '/Q' "/DAppVersion=$($Version -replace '^v', '')" "/DAppFileVersion=$assemblyVersion" (Join-Path $PSScriptRoot 'Installer.iss')
+if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed with exit code $LASTEXITCODE." }
+
 $zip = Join-Path $output 'LootLedger-win-x64.zip'
 Compress-Archive -LiteralPath @($exe, (Join-Path $root 'LICENSE'), (Join-Path $root 'README.md')) -DestinationPath $zip -Force
-$checksums = foreach ($path in @($exe, $zip)) {
+$checksums = foreach ($path in @($exe, $installer, $zip)) {
     '{0}  {1}' -f (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(), [IO.Path]::GetFileName($path)
 }
 [IO.File]::WriteAllLines((Join-Path $output 'SHA256SUMS.txt'), [string[]]$checksums, [Text.UTF8Encoding]::new($false))
-Get-Item -LiteralPath $exe, $zip | Select-Object Name, Length
+Get-Item -LiteralPath $exe, $installer, $zip | Select-Object Name, Length

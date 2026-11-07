@@ -37,7 +37,10 @@ jobs:
       - name: Test shortcuts and tray UI
         run: .\Tests\Test-TrayUi.ps1
 
-      - name: Build executable and ZIP
+      - name: Test counter resets
+        run: .\Tests\Test-Counter.ps1
+
+      - name: Build executable, installer, and ZIP
         env:
           BUILD_VERSION: ${{ github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '0.0.0' }}
         run: .\Build\Build.ps1 -Version $env:BUILD_VERSION
@@ -45,12 +48,16 @@ jobs:
       - name: Test packaged executable
         run: .\Tests\Test-Package.ps1
 
+      - name: Test installer and uninstall
+        run: .\Tests\Test-Installer.ps1
+
       - name: Upload Windows download
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LootLedger-win-x64
           path: |
             dist/LootLedger.exe
+            dist/LootLedger-Setup.exe
             dist/LootLedger-win-x64.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
@@ -82,7 +89,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(dist/LootLedger.exe dist/LootLedger-win-x64.zip dist/SHA256SUMS.txt)
+          assets=(dist/LootLedger.exe dist/LootLedger-Setup.exe dist/LootLedger-win-x64.zip dist/SHA256SUMS.txt)
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           else

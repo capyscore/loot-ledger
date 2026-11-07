@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Preview,
     [string]$RenderPreview,
     [string]$DataDirectory
@@ -9,7 +9,6 @@ $ErrorActionPreference = 'Stop'
 try {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing
     Add-Type -Path (Join-Path $PSScriptRoot 'Tracking.cs') -ReferencedAssemblies System.Drawing
-    Add-Type -Path (Join-Path $PSScriptRoot 'ChestSound.cs')
     Add-Type -Path (Join-Path $PSScriptRoot 'TrayUi.cs') -ReferencedAssemblies System.Drawing, System.Windows.Forms, System.Core
 
     $reader = [System.Xml.XmlReader]::Create((Join-Path $PSScriptRoot 'Overlay.xaml'))
@@ -64,8 +63,6 @@ try {
     $dataDir = if ($DataDirectory) { [IO.Path]::GetFullPath($DataDirectory) }
         else { Join-Path $PSScriptRoot '.loot-ledger' }
     $countPath = Join-Path $dataDir 'counts.json'
-    $soundPath = Join-Path $dataDir 'chest.wav'
-    $audioSetting = Join-Path $dataDir 'use-sound'
     $positionSetting = Join-Path $dataDir 'overlay-position'
     $breakSetting = Join-Path $dataDir 'broken-chest-hotkey'
     $shortcutSetting = Join-Path $dataDir 'broken-chest-shortcut'
@@ -117,21 +114,16 @@ try {
 
     $control = [hashtable]::Synchronized(@{
         Stop = $false
-        SoundVersion = 0
-        Sound = (Test-Path -LiteralPath $audioSetting) -and (Test-Path -LiteralPath $soundPath)
+        CounterVersion = 0
     })
     $messages = [Collections.Concurrent.ConcurrentQueue[object]]::new()
 
     $scanner = {
-        param($control, $messages, $logPath, $soundPath)
+        param($control, $messages, $logPath)
         $ErrorActionPreference = 'Stop'
         $matchLog = [LootLedger.MatchLog]::new($logPath)
         $gate = [LootLedger.ChestGate]::new()
         $clock = [Diagnostics.Stopwatch]::StartNew()
-        $audioHits = [Collections.Concurrent.ConcurrentQueue[long]]::new()
-        $audio = $null
-        $audioPid = 0
-        $soundVersion = -1
         $lastMatch = ''
 
         try {
@@ -154,6 +146,7 @@ try {
             $alphaMode = [Windows.Graphics.Imaging.BitmapAlphaMode, Windows.Foundation, ContentType=WindowsRuntime]::Ignore
 
             while (!$control.Stop) {
+                $counterVersion = $control.CounterVersion
                 $started = $clock.ElapsedMilliseconds
                 $processId = 0
                 $game = [LootLedger.GameWindow]::FocusedClient([ref]$processId)
@@ -164,18 +157,6 @@ try {
                 if ($lastMatch -ne $matchLog.MatchId) {
                     $gate.Reset()
                     $lastMatch = $matchLog.MatchId
-                }
-
-                $wantedAudioPid = if ($scanHud -and ($isPlaying -or $gate.TrackingAllowed) -and $gameFocused -and $control.Sound) { $processId } else { 0 }
-                if ($audioPid -ne $wantedAudioPid -or $soundVersion -ne $control.SoundVersion) {
-                    if ($audio) { $audio.Dispose(); $audio = $null }
-                    [long]$discard = 0
-                    while ($audioHits.TryDequeue([ref]$discard)) { }
-                    $audioPid = $wantedAudioPid
-                    $soundVersion = $control.SoundVersion
-                    if ($audioPid) {
-                        $audio = [LootLedger.ApplicationAudio]::new($audioPid, $soundPath, $clock, $audioHits)
-                    }
                 }
 
                 $warning = ''
@@ -234,12 +215,7 @@ try {
                     $checkPid = 0
                     $stillFocused = [LootLedger.GameWindow]::FocusedClient([ref]$checkPid)
                     if ($checkPid -eq $processId -and !$stillFocused.IsEmpty) {
-                        $hits = [Collections.Generic.List[long]]::new()
-                        [long]$hit = 0
-                        while ($audioHits.TryDequeue([ref]$hit)) {
-                            if ($control.Sound -and $clock.ElapsedMilliseconds - $hit -lt 2200) { $hits.Add($hit) }
-                        }
-                        $delta = $gate.Observe($frameTime, $signals, $hits, $matchLog.Phase)
+                        $delta = $gate.Observe($frameTime, $signals, $matchLog.Phase)
                     }
                 } else {
                     if ($scanHud) { $gate.Suspend() } else { $gate.Reset() }
@@ -249,7 +225,7 @@ try {
                     Game = $game; HasLog = $hasLog; Phase = $matchLog.Phase; MatchId = $matchLog.MatchId
                     Delta = $delta; Source = $gate.Source; Spectating = $signals -and $signals.Spectating
                     Tracking = $scanHud -and $gate.TrackingAllowed
-                    Audio = if ($audio) { $audio.Status } else { '' }
+                    CounterVersion = $counterVersion
                     Warning = $warning; Detail = if ($warning) { $captureError } else { '' }
                 })
                 $delay = if ($gameFocused -and $scanHud) { 135 } else { 550 }
@@ -257,8 +233,6 @@ try {
             }
         } catch {
             $messages.Enqueue([pscustomobject]@{ Fatal = $_.Exception.Message })
-        } finally {
-            if ($audio) { $audio.Dispose() }
         }
     }
 
@@ -285,9 +259,6 @@ try {
     $tray.Visible = $true
     $menu = [Windows.Forms.ContextMenuStrip]::new()
     [LootLedger.LedgerMenuRenderer]::Style($menu)
-    $heading = $menu.Items.Add('LOOT LEDGER')
-    $heading.Enabled = $false
-    [void]$menu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
     $previewItem = $menu.Items.Add('Show preview')
     $overlayItem = $menu.Items.Add('Show in-game overlay')
     $overlayItem.CheckOnClick = $true
@@ -306,24 +277,22 @@ try {
         $item.Checked = $item.Tag -eq $corner
     }
     [void]$menu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
-    $soundItem = $menu.Items.Add('Count unconfirmed sound matches')
-    $soundItem.CheckOnClick = $true
-    $soundItem.Enabled = Test-Path -LiteralPath $soundPath
-    $soundItem.Checked = $control.Sound
-    $importItem = $menu.Items.Add('Load chest sound WAV...')
+    $resetMenu = $menu.Items.Add('Reset counter')
+    [LootLedger.LedgerMenuRenderer]::Style($resetMenu.DropDown)
+    $resetMatchItem = $resetMenu.DropDownItems.Add('Current match')
+    $resetAllItem = $resetMenu.DropDownItems.Add('Match + all-time totals')
     [void]$menu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
     $breakItem = $menu.Items.Add('Enable chest hotkey')
     $breakItem.CheckOnClick = $true
     $changeBreakItem = $menu.Items.Add('Chest hotkey')
     $changeBreakItem.ShortcutKeyDisplayString = $breakShortcut.Text
     [void]$menu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
-    $infoItem = $menu.Items.Add('Tracker status...')
-    [void]$menu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
     $quitItem = $menu.Items.Add('Exit Loot Ledger')
     foreach ($item in $menu.Items) {
         if ($item -is [Windows.Forms.ToolStripMenuItem]) { $item.Padding = [Windows.Forms.Padding]::new(4, 7, 8, 7) }
     }
     foreach ($item in $positionMenu.DropDownItems) { $item.Padding = [Windows.Forms.Padding]::new(4, 7, 8, 7) }
+    foreach ($item in $resetMenu.DropDownItems) { $item.Padding = [Windows.Forms.Padding]::new(4, 7, 8, 7) }
     $tray.ContextMenuStrip = $menu
 
     $ui = @{ Preview = [bool]$Preview; Latest = $null; Dirty = $false; SaveRetry = [datetime]::MinValue
@@ -402,7 +371,27 @@ try {
                 $ui.LastSource = ''
                 $ui.Dirty = $true
             }
-            if ($message.Delta -gt 0) { Add-Chests $message.Delta $message.Source }
+            if ($message.CounterVersion -eq $control.CounterVersion -and $message.Delta -gt 0) {
+                Add-Chests $message.Delta $message.Source
+            }
+        }
+    }
+
+    function Reset-Counter([switch]$AllTime) {
+        Receive-Detections
+        # Ignore a scan already in progress, while preserving notice deduplication.
+        $control.CounterVersion++
+        $state.Match = 0
+        if ($AllTime) { $state.Total = 0 }
+        $ui.LastDelta = 0
+        $ui.LastSource = ''
+        $ui.Dirty = $true
+        $ui.SaveRetry = [datetime]::MinValue
+        Save-Counts
+        if (!$ui.Preview) {
+            $matchText.Text = '0'
+            $totalText.Text = $state.Total.ToString('N0')
+            $eventText.Text = ''
         }
     }
 
@@ -450,36 +439,8 @@ try {
         if ($ui.Preview) { Show-DesktopPreview }
     }
     foreach ($item in $positionMenu.DropDownItems) { $item.Add_Click($selectCorner) }
-    $soundItem.Add_Click({
-        try {
-            if ($soundItem.Checked) { [IO.File]::WriteAllText($audioSetting, 'enabled') }
-            elseif ([IO.File]::Exists($audioSetting)) { [IO.File]::Delete($audioSetting) }
-            $control.Sound = $soundItem.Checked
-        } catch {
-            $soundItem.Checked = $control.Sound
-            [void][Windows.MessageBox]::Show($_.Exception.Message, 'Loot Ledger sound')
-        }
-    })
-    $importItem.Add_Click({
-        $dialog = [Microsoft.Win32.OpenFileDialog]::new()
-        $dialog.Filter = 'WAV audio (*.wav)|*.wav'
-        $dialog.Title = 'Choose a short sample of one chest opening'
-        if ($dialog.ShowDialog()) {
-            try {
-                [void][LootLedger.ChestSound]::Load($dialog.FileName)
-                if (![string]::Equals($dialog.FileName, $soundPath, [StringComparison]::OrdinalIgnoreCase)) {
-                    [IO.File]::Copy($dialog.FileName, "$soundPath.new", $true)
-                    if ([IO.File]::Exists($soundPath)) { [IO.File]::Replace("$soundPath.new", $soundPath, "$soundPath.bak") }
-                    else { [IO.File]::Move("$soundPath.new", $soundPath) }
-                }
-                $control.SoundVersion++
-                $soundItem.Enabled = $true
-                [void][Windows.MessageBox]::Show('Sample loaded. Enable "Count unconfirmed sound matches" in the tray to use it during a match.', 'Loot Ledger sound')
-            } catch {
-                [void][Windows.MessageBox]::Show($_.Exception.Message, 'Loot Ledger sound')
-            }
-        }
-    })
+    $resetMatchItem.Add_Click({ Reset-Counter })
+    $resetAllItem.Add_Click({ Reset-Counter -AllTime })
     $menu.Add_Opening({
         Receive-Detections
     })
@@ -527,18 +488,6 @@ try {
             $ui.CapturingHotkey = $false
         }
     })
-    $infoItem.Add_Click({
-        $status = @("This/last match  $($state.Match)", "All-time total  $($state.Total)")
-        if ($ui.Fatal) { $status += $ui.Fatal }
-        elseif ($ui.Latest) {
-            $status += if ($ui.Latest.HasLog) { "Fortnite phase  $($ui.Latest.Phase)" } else { 'Waiting for the Fortnite game log' }
-            if ($ui.Latest.Warning) { $status += $ui.Latest.Detail }
-            if ($ui.Latest.Audio) { $status += "Audio  $($ui.Latest.Audio)" }
-        }
-        if ($ui.LastSource) { $status += "Last detected by  $($ui.LastSource)" }
-        if ($ui.SaveError) { $status += "Save pending  $($ui.SaveError)" }
-        [void][Windows.MessageBox]::Show(($status -join [Environment]::NewLine), 'Loot Ledger status')
-    })
     $quitItem.Add_Click({
         Receive-Detections
         $ui.SaveRetry = [datetime]::MinValue
@@ -552,7 +501,7 @@ try {
     })
 
     $worker = [powershell]::Create()
-    [void]$worker.AddScript($scanner.ToString()).AddArgument($control).AddArgument($messages).AddArgument($logPath).AddArgument($soundPath)
+    [void]$worker.AddScript($scanner.ToString()).AddArgument($control).AddArgument($messages).AddArgument($logPath)
     $running = $worker.BeginInvoke()
 
     $timer = [Windows.Threading.DispatcherTimer]::new()
@@ -575,7 +524,7 @@ try {
         $totalText.Text = $state.Total.ToString('N0')
         $isLive = $latest.Tracking
         $matchLabel.Text = if ($latest.Phase -in @([LootLedger.MatchPhase]::Lobby, [LootLedger.MatchPhase]::Finished) -and $state.MatchId) { 'LAST MATCH' } else { 'THIS MATCH' }
-        $modeText.Text = if ($latest.Audio -eq 'Listening') { 'SFX+' } else { 'AUTO' }
+        $modeText.Text = 'AUTO'
         $statusText.Text = if ($ui.SaveError) { 'Save pending' }
             elseif (!$latest.HasLog) { 'Waiting for game log' }
             elseif ($latest.Warning) { $latest.Warning }

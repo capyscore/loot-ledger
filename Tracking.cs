@@ -285,9 +285,6 @@ namespace LootLedger
         }
 
         private readonly List<VisibleNotice> visible = new List<VisibleNotice>();
-        private readonly List<long> waitingAudio = new List<long>();
-        private readonly List<long> countedAudio = new List<long>();
-        private readonly List<long> countedHud = new List<long>();
         private HudSignals previousHud;
         private long previousHudTime;
         private long lastSpectator = -10000;
@@ -298,9 +295,6 @@ namespace LootLedger
         public void Reset()
         {
             visible.Clear();
-            waitingAudio.Clear();
-            countedAudio.Clear();
-            countedHud.Clear();
             previousHud = null;
             lastSpectator = -10000;
             leftAircraft = false;
@@ -310,14 +304,11 @@ namespace LootLedger
 
         public void Suspend()
         {
-            waitingAudio.Clear();
-            countedAudio.Clear();
-            countedHud.Clear();
             previousHud = null;
             TrackingAllowed = false;
         }
 
-        public int Observe(long time, HudSignals hud, IEnumerable<long> audio, MatchPhase phase)
+        public int Observe(long time, HudSignals hud, MatchPhase phase)
         {
             if ((phase != MatchPhase.Playing && phase != MatchPhase.Aircraft) ||
                 (hud != null && hud.OnBattleBus))
@@ -336,37 +327,14 @@ namespace LootLedger
             if (hud != null && hud.Spectating)
             {
                 lastSpectator = time;
-                waitingAudio.Clear();
                 previousHud = null;
             }
             if (time - lastSpectator < 1400)
                 return 0;
 
-            countedAudio.RemoveAll(hit => time - hit > 1900);
-            countedHud.RemoveAll(hit => time - hit > 1900);
-            int count = 0;
-            int visualCount = hud == null ? 0 : UpdateNotices(time, hud);
-            for (int i = 0; i < visualCount; i++)
-            {
-                if (Consume(countedAudio, time))
-                    continue;
-                if (!Consume(waitingAudio, time))
-                    countedHud.Add(time);
-                count++;
+            int count = hud == null ? 0 : UpdateNotices(time, hud);
+            if (count > 0)
                 Source = "HUD";
-            }
-
-            foreach (long hit in audio)
-                if (!Consume(countedHud, hit))
-                    waitingAudio.Add(hit);
-
-            while (waitingAudio.Count > 0 && time - waitingAudio[0] >= 950)
-            {
-                countedAudio.Add(waitingAudio[0]);
-                waitingAudio.RemoveAt(0);
-                count++;
-                Source = count > 1 && visualCount > 0 ? "HUD + sound" : "Sound";
-            }
             return count;
         }
 
@@ -424,24 +392,6 @@ namespace LootLedger
             return count;
         }
 
-        private static bool Consume(List<long> hits, long time)
-        {
-            int best = -1;
-            long distance = 1350;
-            for (int i = 0; i < hits.Count; i++)
-            {
-                long gap = Math.Abs(hits[i] - time);
-                if (gap < distance)
-                {
-                    best = i;
-                    distance = gap;
-                }
-            }
-            if (best == -1)
-                return false;
-            hits.RemoveAt(best);
-            return true;
-        }
     }
 
     public enum OverlayCorner { TopLeft, BottomLeft, TopRight, BottomRight }
