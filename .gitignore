@@ -33,6 +33,7 @@ secrets.json
 *.pdb
 bin/
 obj/
+dist/
 
 # Editor and operating system files.
 .vs/

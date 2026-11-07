@@ -15,8 +15,8 @@ A click-through Windows overlay that tracks chests opened each match and keeps y
 
 ## Getting started
 
-1. Download and extract the project, keeping its files together.
-2. Double-click **Start Loot Ledger.cmd**.
+1. Download **LootLedger.exe** from [Releases](../../releases/latest).
+2. Double-click the EXE. No installation needed.
 3. Set Fortnite to **Windowed Fullscreen** with an **English HUD**.
 4. Join a match and start opening chests.
 
@@ -39,7 +39,15 @@ For sound detection, use **Load chest sound WAV...**, then enable **Count unconf
 - Windows **English (United States) OCR** language pack.
 - Windows build **20348+** for optional sound detection.
 
-Counts and settings are saved in `.loot-ledger/`, which is excluded from Git. Screenshots are processed in memory. Recognition can miss unreadable or suppressed chest notices; use the hotkey to fill in gaps.
+The EXE saves counts and settings in `%LOCALAPPDATA%\LootLedger\.loot-ledger`. Screenshots are processed in memory. Recognition can miss unreadable or suppressed chest notices; use the hotkey to fill in gaps.
+
+## Building & releases
+
+[Windows build](../../actions/workflows/windows.yml) tests and builds every push to `main` and every pull request. Download **LootLedger-win-x64** from a successful run, or select **Run workflow** for a manual build.
+
+To publish, push a tag such as `v1.0.0`. CI attaches the EXE, ZIP, and SHA-256 checksums to a GitHub release. Publishing a release in GitHub also triggers the build. No extra secrets are needed.
+
+For a local build, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build\Build.ps1`. To run from source, use **Start Loot Ledger.cmd**; source runs keep saves in `.loot-ledger/` beside the launcher.
 
 ## License
 

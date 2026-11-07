@@ -1,6 +1,7 @@
 param(
     [switch]$Preview,
-    [string]$RenderPreview
+    [string]$RenderPreview,
+    [string]$DataDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,7 +61,8 @@ try {
         return
     }
 
-    $dataDir = Join-Path $PSScriptRoot '.loot-ledger'
+    $dataDir = if ($DataDirectory) { [IO.Path]::GetFullPath($DataDirectory) }
+        else { Join-Path $PSScriptRoot '.loot-ledger' }
     $countPath = Join-Path $dataDir 'counts.json'
     $soundPath = Join-Path $dataDir 'chest.wav'
     $audioSetting = Join-Path $dataDir 'use-sound'
